@@ -46,6 +46,7 @@
 #include <limits.h>
 #include <netdb.h>
 #include <poll.h>
+#include <stdbool.h>
 #include <rdma/rdma_cma.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -384,17 +385,20 @@ static int connRdmaHandleCq(valkeyContext *c) {
     struct ibv_wc wc = {0};
     valkeyRdmaCmd *cmd;
     int ret;
+    bool need_ack = false;
 
     if (ibv_get_cq_event(ctx->comp_channel, &ev_cq, &ev_ctx) < 0) {
         if (errno != EAGAIN) {
             valkeySetError(c, VALKEY_ERR_OTHER, "RDMA: get cq event failed");
             return VALKEY_ERR;
         }
-    } else if (ibv_req_notify_cq(ev_cq, 0)) {
-        valkeySetError(c, VALKEY_ERR_OTHER, "RDMA: notify cq failed");
-        return VALKEY_ERR;
+    } else {
+        need_ack = true;
+        if (ibv_req_notify_cq(ev_cq, 0)) {
+            valkeySetError(c, VALKEY_ERR_OTHER, "RDMA: notify CQ error");
+            return VALKEY_ERR;
+        }
     }
-
 pollcq:
     ret = ibv_poll_cq(ctx->cq, 1, &wc);
     if (ret < 0) {
@@ -404,7 +408,10 @@ pollcq:
         return VALKEY_OK;
     }
 
-    ibv_ack_cq_events(ctx->cq, 1);
+    if (need_ack) {
+        ibv_ack_cq_events(ctx->cq, 1);
+        need_ack = false;
+    }
 
     if (wc.status != IBV_WC_SUCCESS) {
         valkeySetError(c, VALKEY_ERR_OTHER, "RDMA: send/recv failed");
