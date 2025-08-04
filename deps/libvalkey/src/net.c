@@ -62,9 +62,17 @@ void valkeyNetClose(valkeyContext *c) {
 }
 
 static ssize_t valkeyNetRead(valkeyContext *c, char *buf, size_t bufcap) {
-    ssize_t nread = recv(c->fd, buf, bufcap, 0);
+    long timed;
+    int flag = 0;
+    if (valkeyCommandTimeoutMsec(c, &timed)) {
+        return VALKEY_ERR;
+    }
+    if (timed == 0) {
+        flag |= MSG_DONTWAIT;
+    }
+    ssize_t nread = recv(c->fd, buf, bufcap, flag);
     if (nread == -1) {
-        if ((errno == EWOULDBLOCK && !(c->flags & VALKEY_BLOCK)) || (errno == EINTR)) {
+        if ((errno == EWOULDBLOCK && (!(c->flags & VALKEY_BLOCK) || timed==0)) || (errno == EINTR)) {
             /* Try again later */
             return 0;
         } else if (errno == ETIMEDOUT && (c->flags & VALKEY_BLOCK)) {

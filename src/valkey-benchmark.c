@@ -475,6 +475,7 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
      * server already sent the reply and we need to parse it. Parsing overhead
      * is not part of the latency, so calculate it only once, here. */
     if (c->latency < 0) c->latency = ustime() - (c->start);
+
     if (valkeyBufferRead(c->context) != VALKEY_OK) {
         fprintf(stderr, "Error: %s\n", c->context->errstr);
         exit(1);
@@ -976,7 +977,7 @@ static void issueFirstRequestForClients(aeEventLoop* el, int this_thread, int nt
     listNode *ln = config.clients->head;
     int count = 0;
     while (ln) {
-        if (count++%nt == this_thread) {
+        if (count++ % nt == this_thread) {
             client c = ln->value;
             writeHandler(el, c->context->fd, c, 0);
         }

@@ -470,7 +470,6 @@ static int valkeyRdmaPollCqCm(valkeyContext *c, long timed) {
     RdmaContext *ctx = c->privctx;
     long now = vk_msec_now();
     int ret;
-
     if (now >= timed) {
         valkeySetError(c, VALKEY_ERR_IO, "RDMA: IO timeout");
         return VALKEY_ERR;
@@ -514,8 +513,13 @@ static ssize_t valkeyRdmaRead(valkeyContext *c, char *buf, size_t bufcap) {
     if (valkeyCommandTimeoutMsec(c, &timed)) {
         return VALKEY_ERR;
     }
+    if (timed > 0) {
+        end = vk_msec_now() + timed;
+    }else {
+        // end = -1 marks that we don't need timeout, just return.
+        end = -1;
+    }
 
-    end = vk_msec_now() + timed;
 
 pollcq:
     /* try to poll a CQ first */
@@ -535,6 +539,9 @@ pollcq:
         }
 
         return toread;
+    }else if (ctx->recv_offset == ctx->rx_offset && end == -1) {
+        // non-blocking read over an empty buffer just return 0.
+        return 0;
     }
 
     if (valkeyRdmaPollCqCm(c, end) == VALKEY_OK) {
