@@ -1323,24 +1323,36 @@ static size_t connRdmaSend(connection *conn, const void *data, size_t data_len) 
 
     return data_len;
 }
-
+#define RDMA_WRITE_GRANULARITY 16384
 static int connRdmaWrite(connection *conn, const void *data, size_t data_len) {
     rdma_connection *rdma_conn = (rdma_connection *)conn;
     struct rdma_cm_id *cm_id = rdma_conn->cm_id;
     RdmaContext *ctx = cm_id->context;
-    uint32_t towrite;
+    uint32_t remaining_write, total_write, towrite;
 
     if (connRdmaAllowRW(conn)) {
         return C_ERR;
     }
 
     assert(ctx->tx.offset <= ctx->tx.length);
-    towrite = MIN(ctx->tx.length - ctx->tx.offset, data_len);
-    if (!towrite) {
+    total_write = remaining_write = MIN(ctx->tx.length - ctx->tx.offset, data_len);
+    if (!total_write) {
         return 0;
     }
-
-    return connRdmaSend(conn, data, towrite);
+    // A finer granularity will enable the other side to memcpy the message more frequent.
+    // This can benefit the performance on operations with very large data payloads.
+    while (remaining_write > 0) {
+        int this_write = 0;
+        towrite = remaining_write >= RDMA_WRITE_GRANULARITY ? RDMA_WRITE_GRANULARITY : remaining_write;
+        this_write = connRdmaSend(conn, data, towrite);
+        if (this_write < 0) {
+            return this_write;
+        }
+        data = (const void *)((char *)data + towrite);
+        remaining_write -= towrite;
+    }
+    assert(remaining_write == 0);
+    return total_write;
 }
 
 static int connRdmaWritev(connection *conn, const struct iovec *iov, int iovcnt) {

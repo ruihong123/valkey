@@ -46,8 +46,8 @@
 #include <limits.h>
 #include <netdb.h>
 #include <poll.h>
-#include <stdbool.h>
 #include <rdma/rdma_cma.h>
+#include <stdbool.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -515,11 +515,10 @@ static ssize_t valkeyRdmaRead(valkeyContext *c, char *buf, size_t bufcap) {
     }
     if (timed > 0) {
         end = vk_msec_now() + timed;
-    }else {
+    } else {
         // end = -1 marks that we don't need timeout, just return.
         end = -1;
     }
-
 
 pollcq:
     /* try to poll a CQ first */
@@ -539,7 +538,7 @@ pollcq:
         }
 
         return toread;
-    }else if (ctx->recv_offset == ctx->rx_offset && end == -1) {
+    } else if (ctx->recv_offset == ctx->rx_offset && end == -1) {
         // non-blocking read over an empty buffer just return 0.
         return 0;
     }
@@ -583,7 +582,7 @@ static size_t connRdmaSend(RdmaContext *ctx, struct rdma_cm_id *cm_id, const voi
 
     return data_len;
 }
-
+#define RDMA_WRITE_GRANULARITY 16384
 static ssize_t valkeyRdmaWrite(valkeyContext *c) {
     RdmaContext *ctx = c->privctx;
     struct rdma_cm_id *cm_id = ctx->cm_id;
@@ -610,12 +609,24 @@ pollcq:
     }
 
     towrite = valkeyMin(ctx->tx_length - ctx->tx_offset, data_len - wrote);
-    ret = connRdmaSend(ctx, cm_id, c->obuf + wrote, towrite);
-    if (ret == (size_t)VALKEY_ERR) {
-        return VALKEY_ERR;
-    }
+    size_t this_wrote = 0;
+    while (this_wrote < towrite) {
+        size_t data_left = towrite - this_wrote;
+        if (data_left > RDMA_WRITE_GRANULARITY) {
+            ret = connRdmaSend(ctx, cm_id, c->obuf + wrote, RDMA_WRITE_GRANULARITY);
+        } else {
+            ret = connRdmaSend(ctx, cm_id, c->obuf + wrote, data_left);
+        }
 
-    wrote += ret;
+        if (ret == (size_t)VALKEY_ERR) {
+            return VALKEY_ERR;
+        }
+
+        this_wrote += ret;
+        wrote += ret;
+    }
+    assert(this_wrote == towrite);
+
     if (wrote == data_len) {
         return data_len;
     }
